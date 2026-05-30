@@ -32,7 +32,7 @@ const Dashboard = () => {
       <h2 className="mb-4">Dashboard</h2>
 
       <Row>
-        <Col md={3}>
+        <Col xs={12} sm={6} lg={3} className="mb-3">
           <Card className="stat-card bg-primary text-white">
             <Card.Body>
               <div className="d-flex justify-content-between align-items-center">
@@ -46,7 +46,7 @@ const Dashboard = () => {
           </Card>
         </Col>
 
-        <Col md={3}>
+        <Col xs={12} sm={6} lg={3} className="mb-3">
           <Card className="stat-card bg-warning text-white">
             <Card.Body>
               <div className="d-flex justify-content-between align-items-center">
@@ -60,7 +60,7 @@ const Dashboard = () => {
           </Card>
         </Col>
 
-        <Col md={3}>
+        <Col xs={12} sm={6} lg={3} className="mb-3">
           <Card className="stat-card bg-success text-white">
             <Card.Body>
               <div className="d-flex justify-content-between align-items-center">
@@ -74,7 +74,7 @@ const Dashboard = () => {
           </Card>
         </Col>
 
-        <Col md={3}>
+        <Col xs={12} sm={6} lg={3} className="mb-3">
           <Card className="stat-card bg-info text-white">
             <Card.Body>
               <div className="d-flex justify-content-between align-items-center">
@@ -90,68 +90,72 @@ const Dashboard = () => {
       </Row>
 
       <Row className="mt-4">
-        <Col md={6}>
+        <Col xs={12} lg={6} className="mb-4">
           <Card>
             <Card.Header className="bg-white">
               <h5 className="mb-0">Recent Sales</h5>
             </Card.Header>
             <Card.Body>
-              <Table responsive hover>
-                <thead>
-                  <tr>
-                    <th>Invoice</th>
-                    <th>Customer</th>
-                    <th>Amount</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats?.recentSales?.slice(0, 5).map((sale) => (
-                    <tr key={sale.id}>
-                      <td>{sale.invoice_number}</td>
-                      <td>{sale.customer_name || 'Walk-in'}</td>
-                      <td>${sale.grand_total}</td>
-                      <td>
-                        <Badge bg={sale.payment_status === 'paid' ? 'success' : 'warning'}>
-                          {sale.payment_status}
-                        </Badge>
-                      </td>
+              <div className="table-responsive">
+                <Table hover>
+                  <thead>
+                    <tr>
+                      <th>Invoice</th>
+                      <th>Customer</th>
+                      <th>Amount</th>
+                      <th>Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </Table>
+                  </thead>
+                  <tbody>
+                    {stats?.recentSales?.slice(0, 5).map((sale) => (
+                      <tr key={sale.id}>
+                        <td className="text-truncate-mobile">{sale.invoice_number}</td>
+                        <td className="text-truncate-mobile">{sale.customer_name || 'Walk-in'}</td>
+                        <td>${sale.grand_total}</td>
+                        <td>
+                          <Badge bg={sale.payment_status === 'paid' ? 'success' : 'warning'}>
+                            {sale.payment_status}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
             </Card.Body>
           </Card>
         </Col>
 
-        <Col md={6}>
+        <Col xs={12} lg={6} className="mb-4">
           <Card>
             <Card.Header className="bg-white">
               <h5 className="mb-0">Low Stock Alert</h5>
             </Card.Header>
             <Card.Body>
-              <Table responsive hover>
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>SKU</th>
-                    <th>Stock</th>
-                    <th>Reorder Level</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats?.lowStockProducts?.slice(0, 5).map((product) => (
-                    <tr key={product.id}>
-                      <td>{product.name}</td>
-                      <td>{product.sku}</td>
-                      <td>
-                        <Badge bg="danger">{product.quantity_in_stock}</Badge>
-                      </td>
-                      <td>{product.reorder_level}</td>
+              <div className="table-responsive">
+                <Table hover>
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th className="hide-mobile">SKU</th>
+                      <th>Stock</th>
+                      <th className="hide-mobile">Reorder Level</th>
                     </tr>
-                  ))}
-                </tbody>
-              </Table>
+                  </thead>
+                  <tbody>
+                    {stats?.lowStockProducts?.slice(0, 5).map((product) => (
+                      <tr key={product.id}>
+                        <td className="text-truncate-mobile">{product.name}</td>
+                        <td className="hide-mobile">{product.sku}</td>
+                        <td>
+                          <Badge bg="danger">{product.quantity_in_stock}</Badge>
+                        </td>
+                        <td className="hide-mobile">{product.reorder_level}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
             </Card.Body>
           </Card>
         </Col>

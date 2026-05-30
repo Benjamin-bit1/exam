@@ -100,7 +100,7 @@ CREATE TABLE sale_items (
 
 -- Insert Default Admin User (password: admin123)
 INSERT INTO users (name, email, password, role) VALUES 
-('Administrator', 'admin@dabenterprise.com', '$2a$10$rZ5YhJKvXqKqKqKqKqKqKuXqKqKqKqKqKqKqKqKqKqKqKqKqKqKqK', 'administrator');
+('Administrator', 'admin@dabenterprise.com', '$2a$10$egNE0gy./OkIO8ZuXMp.FuFRxfWf9UIa6nVdvY2du5nsU.8VuczW.', 'administrator');
 
 -- Create Indexes for Performance
 CREATE INDEX idx_products_category ON products(category_id);

@@ -6,6 +6,13 @@ const connectDB = require('./config/database');
 // Load environment variables
 dotenv.config();
 
+// Debug: Verify environment variables are loaded
+console.log('Environment variables loaded:');
+console.log('- PORT:', process.env.PORT || '5000 (default)');
+console.log('- MONGODB_URI:', process.env.MONGODB_URI || 'mongodb://localhost:27017/inventory_sales_db (default)');
+console.log('- JWT_SECRET:', process.env.JWT_SECRET ? '✓ Loaded' : '✗ MISSING');
+console.log('- CLIENT_URL:', process.env.CLIENT_URL || 'http://localhost:3000 (default)');
+
 // Connect to MongoDB
 connectDB();
 

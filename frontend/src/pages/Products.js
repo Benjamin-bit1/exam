@@ -137,8 +137,8 @@ const Products = () => {
 
   return (
     <Layout>
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2>Products</h2>
+      <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
+        <h2 className="mb-0">Products</h2>
         <Button variant="primary" onClick={() => handleShowModal()}>
           <FaPlus className="me-2" /> Add Product
         </Button>
@@ -155,53 +155,57 @@ const Products = () => {
         />
       </InputGroup>
 
-      <Table responsive hover>
-        <thead>
-          <tr>
-            <th>SKU</th>
-            <th>Name</th>
-            <th>Category</th>
-            <th>Supplier</th>
-            <th>Price</th>
-            <th>Stock</th>
-            <th>Reorder Level</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredProducts.map((product) => (
-            <tr key={product.id}>
-              <td>{product.sku}</td>
-              <td>{product.name}</td>
-              <td>{product.category_name}</td>
-              <td>{product.supplier_name || 'N/A'}</td>
-              <td>${product.unit_price}</td>
-              <td>
-                <Badge bg={product.quantity_in_stock <= product.reorder_level ? 'danger' : 'success'}>
-                  {product.quantity_in_stock}
-                </Badge>
-              </td>
-              <td>{product.reorder_level}</td>
-              <td>
-                <Badge bg={product.status === 'active' ? 'success' : 'secondary'}>
-                  {product.status}
-                </Badge>
-              </td>
-              <td>
-                <Button variant="warning" size="sm" className="me-2" onClick={() => handleShowModal(product)}>
-                  <FaEdit />
-                </Button>
-                <Button variant="danger" size="sm" onClick={() => handleDelete(product.id)}>
-                  <FaTrash />
-                </Button>
-              </td>
+      <div className="table-responsive">
+        <Table hover>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Name</th>
+              <th className="hide-mobile">Category</th>
+              <th className="hide-mobile">Supplier</th>
+              <th>Price</th>
+              <th>Stock</th>
+              <th className="hide-mobile">Reorder Level</th>
+              <th className="hide-mobile">Status</th>
+              <th>Actions</th>
             </tr>
-          ))}
-        </tbody>
-      </Table>
+          </thead>
+          <tbody>
+            {filteredProducts.map((product) => (
+              <tr key={product.id}>
+                <td className="text-truncate-mobile">{product.sku}</td>
+                <td className="text-truncate-mobile">{product.name}</td>
+                <td className="hide-mobile">{product.category_name}</td>
+                <td className="hide-mobile">{product.supplier_name || 'N/A'}</td>
+                <td>${product.unit_price}</td>
+                <td>
+                  <Badge bg={product.quantity_in_stock <= product.reorder_level ? 'danger' : 'success'}>
+                    {product.quantity_in_stock}
+                  </Badge>
+                </td>
+                <td className="hide-mobile">{product.reorder_level}</td>
+                <td className="hide-mobile">
+                  <Badge bg={product.status === 'active' ? 'success' : 'secondary'}>
+                    {product.status}
+                  </Badge>
+                </td>
+                <td>
+                  <div className="d-flex gap-2">
+                    <Button variant="warning" size="sm" onClick={() => handleShowModal(product)}>
+                      <FaEdit />
+                    </Button>
+                    <Button variant="danger" size="sm" onClick={() => handleDelete(product.id)}>
+                      <FaTrash />
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </div>
 
-      <Modal show={showModal} onHide={handleCloseModal} size="lg">
+      <Modal show={showModal} onHide={handleCloseModal} size="lg" fullscreen="md-down">
         <Modal.Header closeButton>
           <Modal.Title>{editMode ? 'Edit Product' : 'Add Product'}</Modal.Title>
         </Modal.Header>

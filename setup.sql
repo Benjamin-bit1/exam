@@ -150,7 +150,7 @@ CREATE TABLE sale_items (
 -- Default Admin User (password: admin123)
 -- Password hash generated with bcrypt, salt rounds: 10
 INSERT INTO users (name, email, password, role, phone) VALUES 
-('System Administrator', 'admin@dabenterprise.com', '$2a$10$rZ5YhJKvXqKqKqKqKqKqKuXqKqKqKqKqKqKqKqKqKqKqKqKqKqKqK', 'administrator', '+1234567890');
+('System Administrator', 'admin@dabenterprise.com', '$2a$10$egNE0gy./OkIO8ZuXMp.FuFRxfWf9UIa6nVdvY2du5nsU.8VuczW.', 'administrator', '+1234567890');
 
 -- Sample Categories
 INSERT INTO categories (name, description, status, created_by) VALUES
