@@ -1,61 +1,100 @@
-const db = require('../config/database');
+const Sale = require('../models/Sale');
+const Product = require('../models/Product');
 const { generateInvoiceNumber } = require('../utils/invoiceGenerator');
+const mongoose = require('mongoose');
 
 exports.getSales = async (req, res) => {
   try {
     const { start_date, end_date, payment_status } = req.query;
-    let query = `
-      SELECT s.*, u.name as sold_by_name, 
-      (SELECT COUNT(*) FROM sale_items WHERE sale_id = s.id) as items_count
-      FROM sales s
-      LEFT JOIN users u ON s.sold_by = u.id
-      WHERE 1=1
-    `;
-    const params = [];
+    const filter = {};
 
     if (start_date && end_date) {
-      query += ' AND DATE(s.sale_date) BETWEEN ? AND ?';
-      params.push(start_date, end_date);
+      filter.saleDate = {
+        $gte: new Date(start_date),
+        $lte: new Date(end_date + 'T23:59:59.999Z')
+      };
     }
     if (payment_status) {
-      query += ' AND s.payment_status = ?';
-      params.push(payment_status);
+      filter.paymentStatus = payment_status;
     }
-    query += ' ORDER BY s.sale_date DESC';
 
-    const [sales] = await db.query(query, params);
-    res.json({ success: true, count: sales.length, data: sales });
+    const sales = await Sale.find(filter)
+      .populate('soldBy', 'name')
+      .sort({ saleDate: -1 });
+
+    const salesResponse = sales.map(sale => ({
+      id: sale._id,
+      invoice_number: sale.invoiceNumber,
+      customer_name: sale.customerName,
+      customer_phone: sale.customerPhone,
+      customer_email: sale.customerEmail,
+      total_amount: sale.totalAmount,
+      discount: sale.discount,
+      tax: sale.tax,
+      grand_total: sale.grandTotal,
+      payment_method: sale.paymentMethod,
+      payment_status: sale.paymentStatus,
+      notes: sale.notes,
+      sold_by_name: sale.soldBy?.name,
+      sale_date: sale.saleDate,
+      items_count: sale.items.length,
+      createdAt: sale.createdAt
+    }));
+
+    res.json({ success: true, count: salesResponse.length, data: salesResponse });
   } catch (error) {
+    console.error('Get sales error:', error);
     res.status(500).json({ success: false, message: 'Error fetching sales' });
   }
 };
 
 exports.getSale = async (req, res) => {
   try {
-    const [sales] = await db.query(
-      `SELECT s.*, u.name as sold_by_name FROM sales s LEFT JOIN users u ON s.sold_by = u.id WHERE s.id = ?`,
-      [req.params.id]
-    );
-    if (sales.length === 0) {
+    const sale = await Sale.findById(req.params.id)
+      .populate('soldBy', 'name')
+      .populate('items.product', 'name');
+
+    if (!sale) {
       return res.status(404).json({ success: false, message: 'Sale not found' });
     }
 
-    const [items] = await db.query(
-      `SELECT si.*, p.name as product_name FROM sale_items si LEFT JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?`,
-      [req.params.id]
-    );
+    const saleResponse = {
+      id: sale._id,
+      invoice_number: sale.invoiceNumber,
+      customer_name: sale.customerName,
+      customer_phone: sale.customerPhone,
+      customer_email: sale.customerEmail,
+      total_amount: sale.totalAmount,
+      discount: sale.discount,
+      tax: sale.tax,
+      grand_total: sale.grandTotal,
+      payment_method: sale.paymentMethod,
+      payment_status: sale.paymentStatus,
+      notes: sale.notes,
+      sold_by_name: sale.soldBy?.name,
+      sale_date: sale.saleDate,
+      items: sale.items.map(item => ({
+        id: item._id,
+        product_id: item.product,
+        product_name: item.productName,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        subtotal: item.subtotal
+      }))
+    };
 
-    res.json({ success: true, data: { ...sales[0], items } });
+    res.json({ success: true, data: saleResponse });
   } catch (error) {
+    console.error('Get sale error:', error);
     res.status(500).json({ success: false, message: 'Error fetching sale' });
   }
 };
 
 exports.createSale = async (req, res) => {
-  const connection = await db.getConnection();
-  try {
-    await connection.beginTransaction();
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
+  try {
     const { customer_name, customer_phone, customer_email, items, discount, tax, payment_method, payment_status, notes } = req.body;
 
     // Calculate totals
@@ -67,69 +106,89 @@ exports.createSale = async (req, res) => {
     const grand_total = total_amount - (discount || 0) + (tax || 0);
     const invoice_number = generateInvoiceNumber();
 
-    // Insert sale
-    const [saleResult] = await connection.query(
-      `INSERT INTO sales (invoice_number, customer_name, customer_phone, customer_email, total_amount, discount, tax, grand_total, payment_method, payment_status, notes, sold_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [invoice_number, customer_name, customer_phone, customer_email, total_amount, discount || 0, tax || 0, grand_total, payment_method, payment_status, notes, req.user.id]
-    );
+    // Create sale
+    const sale = await Sale.create([{
+      invoiceNumber: invoice_number,
+      customerName: customer_name,
+      customerPhone: customer_phone,
+      customerEmail: customer_email,
+      items: items.map(item => ({
+        product: item.product_id,
+        productName: item.product_name,
+        quantity: item.quantity,
+        unitPrice: item.unit_price,
+        subtotal: item.quantity * item.unit_price
+      })),
+      totalAmount: total_amount,
+      discount: discount || 0,
+      tax: tax || 0,
+      grandTotal: grand_total,
+      paymentMethod: payment_method,
+      paymentStatus: payment_status,
+      notes,
+      soldBy: req.user.id
+    }], { session });
 
-    const sale_id = saleResult.insertId;
-
-    // Insert sale items and update stock
+    // Update product stock
     for (const item of items) {
-      const subtotal = item.quantity * item.unit_price;
-      
-      await connection.query(
-        'INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?, ?)',
-        [sale_id, item.product_id, item.product_name, item.quantity, item.unit_price, subtotal]
-      );
-
-      // Update product stock
-      await connection.query(
-        'UPDATE products SET quantity_in_stock = quantity_in_stock - ? WHERE id = ?',
-        [item.quantity, item.product_id]
+      await Product.findByIdAndUpdate(
+        item.product_id,
+        { $inc: { quantityInStock: -item.quantity } },
+        { session }
       );
     }
 
-    await connection.commit();
+    await session.commitTransaction();
 
-    const [newSale] = await db.query('SELECT * FROM sales WHERE id = ?', [sale_id]);
-    res.status(201).json({ success: true, message: 'Sale created successfully', data: newSale[0] });
+    res.status(201).json({ 
+      success: true, 
+      message: 'Sale created successfully', 
+      data: {
+        id: sale[0]._id,
+        invoice_number: sale[0].invoiceNumber,
+        grand_total: sale[0].grandTotal
+      }
+    });
   } catch (error) {
-    await connection.rollback();
+    await session.abortTransaction();
     console.error('Create sale error:', error);
     res.status(500).json({ success: false, message: 'Error creating sale' });
   } finally {
-    connection.release();
+    session.endSession();
   }
 };
 
 exports.deleteSale = async (req, res) => {
-  const connection = await db.getConnection();
-  try {
-    await connection.beginTransaction();
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-    // Get sale items to restore stock
-    const [items] = await connection.query('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?', [req.params.id]);
+  try {
+    const sale = await Sale.findById(req.params.id).session(session);
+
+    if (!sale) {
+      await session.abortTransaction();
+      return res.status(404).json({ success: false, message: 'Sale not found' });
+    }
 
     // Restore stock
-    for (const item of items) {
-      await connection.query(
-        'UPDATE products SET quantity_in_stock = quantity_in_stock + ? WHERE id = ?',
-        [item.quantity, item.product_id]
+    for (const item of sale.items) {
+      await Product.findByIdAndUpdate(
+        item.product,
+        { $inc: { quantityInStock: item.quantity } },
+        { session }
       );
     }
 
-    // Delete sale (cascade will delete items)
-    await connection.query('DELETE FROM sales WHERE id = ?', [req.params.id]);
+    // Delete sale
+    await Sale.findByIdAndDelete(req.params.id).session(session);
 
-    await connection.commit();
+    await session.commitTransaction();
     res.json({ success: true, message: 'Sale deleted successfully' });
   } catch (error) {
-    await connection.rollback();
+    await session.abortTransaction();
+    console.error('Delete sale error:', error);
     res.status(500).json({ success: false, message: 'Error deleting sale' });
   } finally {
-    connection.release();
+    session.endSession();
   }
 };

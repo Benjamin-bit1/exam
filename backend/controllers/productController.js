@@ -1,42 +1,49 @@
-const db = require('../config/database');
+const Product = require('../models/Product');
 
 // Get all products
 exports.getProducts = async (req, res) => {
   try {
     const { status, category_id, low_stock } = req.query;
     
-    let query = `
-      SELECT p.*, c.name as category_name, s.name as supplier_name, u.name as created_by_name
-      FROM products p
-      LEFT JOIN categories c ON p.category_id = c.id
-      LEFT JOIN suppliers s ON p.supplier_id = s.id
-      LEFT JOIN users u ON p.created_by = u.id
-      WHERE 1=1
-    `;
-    const params = [];
+    const filter = {};
+    if (status) filter.status = status;
+    if (category_id) filter.category = category_id;
 
-    if (status) {
-      query += ' AND p.status = ?';
-      params.push(status);
-    }
+    let query = Product.find(filter)
+      .populate('category', 'name')
+      .populate('supplier', 'name')
+      .populate('createdBy', 'name')
+      .sort({ name: 1 });
 
-    if (category_id) {
-      query += ' AND p.category_id = ?';
-      params.push(category_id);
-    }
+    let products = await query;
 
     if (low_stock === 'true') {
-      query += ' AND p.quantity_in_stock <= p.reorder_level';
+      products = products.filter(p => p.quantityInStock <= p.reorderLevel);
     }
 
-    query += ' ORDER BY p.name ASC';
-
-    const [products] = await db.query(query, params);
+    const productsResponse = products.map(p => ({
+      id: p._id,
+      name: p.name,
+      sku: p.sku,
+      category_id: p.category?._id,
+      category_name: p.category?.name,
+      supplier_id: p.supplier?._id,
+      supplier_name: p.supplier?.name,
+      description: p.description,
+      unit_price: p.unitPrice,
+      quantity_in_stock: p.quantityInStock,
+      reorder_level: p.reorderLevel,
+      image_url: p.imageUrl,
+      status: p.status,
+      created_by_name: p.createdBy?.name,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt
+    }));
 
     res.json({
       success: true,
-      count: products.length,
-      data: products
+      count: productsResponse.length,
+      data: productsResponse
     });
   } catch (error) {
     console.error('Get products error:', error);
@@ -50,17 +57,12 @@ exports.getProducts = async (req, res) => {
 // Get single product
 exports.getProduct = async (req, res) => {
   try {
-    const [products] = await db.query(
-      `SELECT p.*, c.name as category_name, s.name as supplier_name, u.name as created_by_name
-       FROM products p
-       LEFT JOIN categories c ON p.category_id = c.id
-       LEFT JOIN suppliers s ON p.supplier_id = s.id
-       LEFT JOIN users u ON p.created_by = u.id
-       WHERE p.id = ?`,
-      [req.params.id]
-    );
+    const product = await Product.findById(req.params.id)
+      .populate('category', 'name')
+      .populate('supplier', 'name')
+      .populate('createdBy', 'name');
 
-    if (products.length === 0) {
+    if (!product) {
       return res.status(404).json({
         success: false,
         message: 'Product not found'
@@ -69,7 +71,22 @@ exports.getProduct = async (req, res) => {
 
     res.json({
       success: true,
-      data: products[0]
+      data: {
+        id: product._id,
+        name: product.name,
+        sku: product.sku,
+        category_id: product.category?._id,
+        category_name: product.category?.name,
+        supplier_id: product.supplier?._id,
+        supplier_name: product.supplier?.name,
+        description: product.description,
+        unit_price: product.unitPrice,
+        quantity_in_stock: product.quantityInStock,
+        reorder_level: product.reorderLevel,
+        image_url: product.imageUrl,
+        status: product.status,
+        created_by_name: product.createdBy?.name
+      }
     });
   } catch (error) {
     console.error('Get product error:', error);
@@ -86,27 +103,42 @@ exports.createProduct = async (req, res) => {
     const { name, sku, category_id, supplier_id, description, unit_price, quantity_in_stock, reorder_level, status } = req.body;
 
     // Check for duplicate SKU
-    const [existing] = await db.query('SELECT id FROM products WHERE sku = ?', [sku]);
+    const existing = await Product.findOne({ sku });
     
-    if (existing.length > 0) {
+    if (existing) {
       return res.status(400).json({
         success: false,
         message: 'Product with this SKU already exists'
       });
     }
 
-    const [result] = await db.query(
-      `INSERT INTO products (name, sku, category_id, supplier_id, description, unit_price, quantity_in_stock, reorder_level, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, sku, category_id, supplier_id || null, description, unit_price, quantity_in_stock || 0, reorder_level || 10, status || 'active', req.user.id]
-    );
-
-    const [newProduct] = await db.query('SELECT * FROM products WHERE id = ?', [result.insertId]);
+    const product = await Product.create({
+      name,
+      sku,
+      category: category_id,
+      supplier: supplier_id || null,
+      description,
+      unitPrice: unit_price,
+      quantityInStock: quantity_in_stock || 0,
+      reorderLevel: reorder_level || 10,
+      status: status || 'active',
+      createdBy: req.user.id
+    });
 
     res.status(201).json({
       success: true,
       message: 'Product created successfully',
-      data: newProduct[0]
+      data: {
+        id: product._id,
+        name: product.name,
+        sku: product.sku,
+        category_id: product.category,
+        supplier_id: product.supplier,
+        unit_price: product.unitPrice,
+        quantity_in_stock: product.quantityInStock,
+        reorder_level: product.reorderLevel,
+        status: product.status
+      }
     });
   } catch (error) {
     console.error('Create product error:', error);
@@ -123,9 +155,9 @@ exports.updateProduct = async (req, res) => {
     const { name, sku, category_id, supplier_id, description, unit_price, quantity_in_stock, reorder_level, status } = req.body;
 
     // Check if product exists
-    const [existing] = await db.query('SELECT id FROM products WHERE id = ?', [req.params.id]);
+    const product = await Product.findById(req.params.id);
     
-    if (existing.length === 0) {
+    if (!product) {
       return res.status(404).json({
         success: false,
         message: 'Product not found'
@@ -133,30 +165,43 @@ exports.updateProduct = async (req, res) => {
     }
 
     // Check for duplicate SKU
-    const [duplicate] = await db.query(
-      'SELECT id FROM products WHERE sku = ? AND id != ?',
-      [sku, req.params.id]
-    );
+    const duplicate = await Product.findOne({
+      sku,
+      _id: { $ne: req.params.id }
+    });
     
-    if (duplicate.length > 0) {
+    if (duplicate) {
       return res.status(400).json({
         success: false,
         message: 'Product with this SKU already exists'
       });
     }
 
-    await db.query(
-      `UPDATE products SET name = ?, sku = ?, category_id = ?, supplier_id = ?, description = ?, 
-       unit_price = ?, quantity_in_stock = ?, reorder_level = ?, status = ? WHERE id = ?`,
-      [name, sku, category_id, supplier_id || null, description, unit_price, quantity_in_stock, reorder_level, status, req.params.id]
-    );
-
-    const [updated] = await db.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    product.name = name;
+    product.sku = sku;
+    product.category = category_id;
+    product.supplier = supplier_id || null;
+    product.description = description;
+    product.unitPrice = unit_price;
+    product.quantityInStock = quantity_in_stock;
+    product.reorderLevel = reorder_level;
+    product.status = status;
+    await product.save();
 
     res.json({
       success: true,
       message: 'Product updated successfully',
-      data: updated[0]
+      data: {
+        id: product._id,
+        name: product.name,
+        sku: product.sku,
+        category_id: product.category,
+        supplier_id: product.supplier,
+        unit_price: product.unitPrice,
+        quantity_in_stock: product.quantityInStock,
+        reorder_level: product.reorderLevel,
+        status: product.status
+      }
     });
   } catch (error) {
     console.error('Update product error:', error);
@@ -170,19 +215,21 @@ exports.updateProduct = async (req, res) => {
 // Delete product
 exports.deleteProduct = async (req, res) => {
   try {
-    // Check if product has sales
-    const [sales] = await db.query('SELECT id FROM sale_items WHERE product_id = ?', [req.params.id]);
+    const Sale = require('../models/Sale');
     
-    if (sales.length > 0) {
+    // Check if product has sales
+    const sales = await Sale.findOne({ 'items.product': req.params.id });
+    
+    if (sales) {
       return res.status(400).json({
         success: false,
         message: 'Cannot delete product with sales history'
       });
     }
 
-    const [result] = await db.query('DELETE FROM products WHERE id = ?', [req.params.id]);
+    const product = await Product.findByIdAndDelete(req.params.id);
 
-    if (result.affectedRows === 0) {
+    if (!product) {
       return res.status(404).json({
         success: false,
         message: 'Product not found'
@@ -205,18 +252,18 @@ exports.deleteProduct = async (req, res) => {
 // Update stock
 exports.updateStock = async (req, res) => {
   try {
-    const { quantity, operation } = req.body; // operation: 'add' or 'subtract'
+    const { quantity, operation } = req.body;
 
-    const [products] = await db.query('SELECT quantity_in_stock FROM products WHERE id = ?', [req.params.id]);
+    const product = await Product.findById(req.params.id);
 
-    if (products.length === 0) {
+    if (!product) {
       return res.status(404).json({
         success: false,
         message: 'Product not found'
       });
     }
 
-    let newQuantity = products[0].quantity_in_stock;
+    let newQuantity = product.quantityInStock;
 
     if (operation === 'add') {
       newQuantity += parseInt(quantity);
@@ -230,14 +277,17 @@ exports.updateStock = async (req, res) => {
       }
     }
 
-    await db.query('UPDATE products SET quantity_in_stock = ? WHERE id = ?', [newQuantity, req.params.id]);
-
-    const [updated] = await db.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    product.quantityInStock = newQuantity;
+    await product.save();
 
     res.json({
       success: true,
       message: 'Stock updated successfully',
-      data: updated[0]
+      data: {
+        id: product._id,
+        name: product.name,
+        quantity_in_stock: product.quantityInStock
+      }
     });
   } catch (error) {
     console.error('Update stock error:', error);

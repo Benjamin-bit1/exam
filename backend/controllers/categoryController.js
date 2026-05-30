@@ -1,26 +1,34 @@
-const db = require('../config/database');
+const Category = require('../models/Category');
+const Product = require('../models/Product');
 
 // Get all categories
 exports.getCategories = async (req, res) => {
   try {
     const { status } = req.query;
     
-    let query = 'SELECT c.*, u.name as created_by_name FROM categories c LEFT JOIN users u ON c.created_by = u.id';
-    const params = [];
-
+    const filter = {};
     if (status) {
-      query += ' WHERE c.status = ?';
-      params.push(status);
+      filter.status = status;
     }
 
-    query += ' ORDER BY c.name ASC';
+    const categories = await Category.find(filter)
+      .populate('createdBy', 'name')
+      .sort({ name: 1 });
 
-    const [categories] = await db.query(query, params);
+    const categoriesResponse = categories.map(cat => ({
+      id: cat._id,
+      name: cat.name,
+      description: cat.description,
+      status: cat.status,
+      created_by_name: cat.createdBy?.name,
+      createdAt: cat.createdAt,
+      updatedAt: cat.updatedAt
+    }));
 
     res.json({
       success: true,
-      count: categories.length,
-      data: categories
+      count: categoriesResponse.length,
+      data: categoriesResponse
     });
   } catch (error) {
     console.error('Get categories error:', error);
@@ -34,12 +42,10 @@ exports.getCategories = async (req, res) => {
 // Get single category
 exports.getCategory = async (req, res) => {
   try {
-    const [categories] = await db.query(
-      'SELECT c.*, u.name as created_by_name FROM categories c LEFT JOIN users u ON c.created_by = u.id WHERE c.id = ?',
-      [req.params.id]
-    );
+    const category = await Category.findById(req.params.id)
+      .populate('createdBy', 'name');
 
-    if (categories.length === 0) {
+    if (!category) {
       return res.status(404).json({
         success: false,
         message: 'Category not found'
@@ -48,7 +54,15 @@ exports.getCategory = async (req, res) => {
 
     res.json({
       success: true,
-      data: categories[0]
+      data: {
+        id: category._id,
+        name: category.name,
+        description: category.description,
+        status: category.status,
+        created_by_name: category.createdBy?.name,
+        createdAt: category.createdAt,
+        updatedAt: category.updatedAt
+      }
     });
   } catch (error) {
     console.error('Get category error:', error);
@@ -65,26 +79,31 @@ exports.createCategory = async (req, res) => {
     const { name, description, status } = req.body;
 
     // Check for duplicate
-    const [existing] = await db.query('SELECT id FROM categories WHERE name = ?', [name]);
+    const existing = await Category.findOne({ name });
     
-    if (existing.length > 0) {
+    if (existing) {
       return res.status(400).json({
         success: false,
         message: 'Category with this name already exists'
       });
     }
 
-    const [result] = await db.query(
-      'INSERT INTO categories (name, description, status, created_by) VALUES (?, ?, ?, ?)',
-      [name, description, status || 'active', req.user.id]
-    );
-
-    const [newCategory] = await db.query('SELECT * FROM categories WHERE id = ?', [result.insertId]);
+    const category = await Category.create({
+      name,
+      description,
+      status: status || 'active',
+      createdBy: req.user.id
+    });
 
     res.status(201).json({
       success: true,
       message: 'Category created successfully',
-      data: newCategory[0]
+      data: {
+        id: category._id,
+        name: category.name,
+        description: category.description,
+        status: category.status
+      }
     });
   } catch (error) {
     console.error('Create category error:', error);
@@ -101,9 +120,9 @@ exports.updateCategory = async (req, res) => {
     const { name, description, status } = req.body;
 
     // Check if category exists
-    const [existing] = await db.query('SELECT id FROM categories WHERE id = ?', [req.params.id]);
+    const category = await Category.findById(req.params.id);
     
-    if (existing.length === 0) {
+    if (!category) {
       return res.status(404).json({
         success: false,
         message: 'Category not found'
@@ -111,29 +130,32 @@ exports.updateCategory = async (req, res) => {
     }
 
     // Check for duplicate name
-    const [duplicate] = await db.query(
-      'SELECT id FROM categories WHERE name = ? AND id != ?',
-      [name, req.params.id]
-    );
+    const duplicate = await Category.findOne({ 
+      name, 
+      _id: { $ne: req.params.id } 
+    });
     
-    if (duplicate.length > 0) {
+    if (duplicate) {
       return res.status(400).json({
         success: false,
         message: 'Category with this name already exists'
       });
     }
 
-    await db.query(
-      'UPDATE categories SET name = ?, description = ?, status = ? WHERE id = ?',
-      [name, description, status, req.params.id]
-    );
-
-    const [updated] = await db.query('SELECT * FROM categories WHERE id = ?', [req.params.id]);
+    category.name = name;
+    category.description = description;
+    category.status = status;
+    await category.save();
 
     res.json({
       success: true,
       message: 'Category updated successfully',
-      data: updated[0]
+      data: {
+        id: category._id,
+        name: category.name,
+        description: category.description,
+        status: category.status
+      }
     });
   } catch (error) {
     console.error('Update category error:', error);
@@ -148,18 +170,18 @@ exports.updateCategory = async (req, res) => {
 exports.deleteCategory = async (req, res) => {
   try {
     // Check if category has products
-    const [products] = await db.query('SELECT id FROM products WHERE category_id = ?', [req.params.id]);
+    const products = await Product.findOne({ category: req.params.id });
     
-    if (products.length > 0) {
+    if (products) {
       return res.status(400).json({
         success: false,
         message: 'Cannot delete category with associated products'
       });
     }
 
-    const [result] = await db.query('DELETE FROM categories WHERE id = ?', [req.params.id]);
+    const category = await Category.findByIdAndDelete(req.params.id);
 
-    if (result.affectedRows === 0) {
+    if (!category) {
       return res.status(404).json({
         success: false,
         message: 'Category not found'

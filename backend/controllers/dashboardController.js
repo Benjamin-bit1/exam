@@ -1,63 +1,135 @@
-const db = require('../config/database');
+const Product = require('../models/Product');
+const Sale = require('../models/Sale');
 
 exports.getDashboardStats = async (req, res) => {
   try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+
     // Total products
-    const [productCount] = await db.query('SELECT COUNT(*) as count FROM products WHERE status = "active"');
+    const totalProducts = await Product.countDocuments({ status: 'active' });
     
     // Low stock products
-    const [lowStockCount] = await db.query('SELECT COUNT(*) as count FROM products WHERE quantity_in_stock <= reorder_level AND status = "active"');
+    const allProducts = await Product.find({ status: 'active' });
+    const lowStockCount = allProducts.filter(p => p.quantityInStock <= p.reorderLevel).length;
     
-    // Total sales today
-    const [todaySales] = await db.query('SELECT COUNT(*) as count, COALESCE(SUM(grand_total), 0) as total FROM sales WHERE DATE(sale_date) = CURDATE()');
+    // Today's sales
+    const todaySalesData = await Sale.aggregate([
+      {
+        $match: {
+          saleDate: { $gte: today, $lt: tomorrow }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          total: { $sum: '$grandTotal' }
+        }
+      }
+    ]);
+
+    const todaySales = todaySalesData.length > 0 
+      ? { count: todaySalesData[0].count, total: todaySalesData[0].total }
+      : { count: 0, total: 0 };
     
-    // Total sales this month
-    const [monthSales] = await db.query('SELECT COUNT(*) as count, COALESCE(SUM(grand_total), 0) as total FROM sales WHERE MONTH(sale_date) = MONTH(CURDATE()) AND YEAR(sale_date) = YEAR(CURDATE())');
+    // Month sales
+    const monthSalesData = await Sale.aggregate([
+      {
+        $match: {
+          saleDate: { $gte: firstDayOfMonth, $lte: lastDayOfMonth }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          total: { $sum: '$grandTotal' }
+        }
+      }
+    ]);
+
+    const monthSales = monthSalesData.length > 0
+      ? { count: monthSalesData[0].count, total: monthSalesData[0].total }
+      : { count: 0, total: 0 };
     
     // Recent sales
-    const [recentSales] = await db.query(`
-      SELECT s.*, u.name as sold_by_name 
-      FROM sales s 
-      LEFT JOIN users u ON s.sold_by = u.id 
-      ORDER BY s.sale_date DESC 
-      LIMIT 10
-    `);
+    const recentSales = await Sale.find()
+      .populate('soldBy', 'name')
+      .sort({ saleDate: -1 })
+      .limit(10);
+
+    const recentSalesResponse = recentSales.map(sale => ({
+      id: sale._id,
+      invoice_number: sale.invoiceNumber,
+      customer_name: sale.customerName,
+      grand_total: sale.grandTotal,
+      payment_status: sale.paymentStatus,
+      sale_date: sale.saleDate,
+      sold_by_name: sale.soldBy?.name
+    }));
     
     // Low stock products
-    const [lowStockProducts] = await db.query(`
-      SELECT p.*, c.name as category_name 
-      FROM products p 
-      LEFT JOIN categories c ON p.category_id = c.id 
-      WHERE p.quantity_in_stock <= p.reorder_level AND p.status = 'active' 
-      ORDER BY p.quantity_in_stock ASC 
-      LIMIT 10
-    `);
+    const lowStockProducts = allProducts
+      .filter(p => p.quantityInStock <= p.reorderLevel)
+      .sort((a, b) => a.quantityInStock - b.quantityInStock)
+      .slice(0, 10);
+
+    const lowStockProductsResponse = await Promise.all(
+      lowStockProducts.map(async (p) => {
+        await p.populate('category', 'name');
+        return {
+          id: p._id,
+          name: p.name,
+          sku: p.sku,
+          quantity_in_stock: p.quantityInStock,
+          reorder_level: p.reorderLevel,
+          category_name: p.category?.name
+        };
+      })
+    );
     
     // Top selling products
-    const [topProducts] = await db.query(`
-      SELECT p.name, p.sku, SUM(si.quantity) as total_sold, SUM(si.subtotal) as total_revenue
-      FROM sale_items si
-      JOIN products p ON si.product_id = p.id
-      GROUP BY si.product_id
-      ORDER BY total_sold DESC
-      LIMIT 10
-    `);
+    const topProductsData = await Sale.aggregate([
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.product',
+          productName: { $first: '$items.productName' },
+          total_sold: { $sum: '$items.quantity' },
+          total_revenue: { $sum: '$items.subtotal' }
+        }
+      },
+      { $sort: { total_sold: -1 } },
+      { $limit: 10 }
+    ]);
+
+    const topProducts = await Promise.all(
+      topProductsData.map(async (item) => {
+        const product = await Product.findById(item._id).select('sku');
+        return {
+          name: item.productName,
+          sku: product?.sku || 'N/A',
+          total_sold: item.total_sold,
+          total_revenue: item.total_revenue
+        };
+      })
+    );
 
     res.json({
       success: true,
       data: {
-        totalProducts: productCount[0].count,
-        lowStockCount: lowStockCount[0].count,
-        todaySales: {
-          count: todaySales[0].count,
-          total: parseFloat(todaySales[0].total)
-        },
-        monthSales: {
-          count: monthSales[0].count,
-          total: parseFloat(monthSales[0].total)
-        },
-        recentSales,
-        lowStockProducts,
+        totalProducts,
+        lowStockCount,
+        todaySales,
+        monthSales,
+        recentSales: recentSalesResponse,
+        lowStockProducts: lowStockProductsResponse,
         topProducts
       }
     });
